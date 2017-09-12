@@ -50,7 +50,7 @@ def parse_args_or_exit(argv=None):
     patchqueues = [arg for arg in argv if patch_re.match(arg)]
     parsed_args.patchqueue = None
     if patchqueues:
-        parsed_args.patchqueue = patchqueues[0]
+        parsed_args.patchqueue = patchqueues
 
     return parsed_args
 
@@ -150,24 +150,35 @@ def populate_working_directory(tmpdir, spec, link, sources, patchqueue):
     spec = Spec(tmp_specfile, check_package_name=False)
 
     # Expand patchqueue to working area, rewriting spec as needed
+    print('link => %s, pq => %s' % (link, patchqueue))
     if link and patchqueue:
-        # Extract patches
-        if link.patchqueue is not None:
-            with Patchqueue(patchqueue,
-                            branch=link.patchqueue) as patches:
-                patches.extract_all(tmpdir)
-                patches.add_to_spec(spec, tmp_specfile)
+        branch_name = link.patchqueue
+        for idx in range(0, len(patchqueue)):
+            # Extract patches
+            if link.patchqueue is not None:
+                with Patchqueue(patchqueue[idx],
+                                branch_name) as patches:
+                    try:
+                        patches.extract_all(tmpdir)
+                        patches.add_to_spec(spec, tmp_specfile)
+                    except KeyError:
+                        # No series file so not a patchqueue
+                        pass
 
-        # Extract non-patchqueue sources
-        with Tarball(patchqueue) as tarball:
-            if link.sources is not None:
-                for source in spec.local_sources():
-                    path = os.path.join(link.sources, source)
-                    tarball.extract(path, tmpdir)
-            if link.patches is not None:
-                for patch in spec.local_patches():
-                    path = os.path.join(link.patches, patch)
-                    tarball.extract(path, tmpdir)
+            try:
+                # Extract non-patchqueue sources
+                with Tarball(patchqueue[idx]) as tarball:
+                    if link.sources is not None:
+                        for source in spec.local_sources():
+                            path = os.path.join(link.sources, source)
+                            tarball.extract(path, tmpdir)
+                    if link.patches is not None:
+                        for patch in spec.local_patches():
+                            path = os.path.join(link.patches, patch)
+                            tarball.extract(path, tmpdir)
+            except KeyError:
+                # TODO: make this nicer. Doesn't contain the file.
+                pass
 
     return tmp_specfile
 
