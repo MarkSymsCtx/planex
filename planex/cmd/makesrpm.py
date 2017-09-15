@@ -46,11 +46,25 @@ def parse_args_or_exit(argv=None):
     if links:
         parsed_args.link = Link(links[0])
 
-    patch_re = re.compile(r'.*patches\d*.tar$')
-    patchqueues = [arg for arg in argv if patch_re.match(arg)]
     parsed_args.patchqueue = None
-    if patchqueues:
-        parsed_args.patchqueue = patchqueues
+    if parsed_args.link:
+        link = parsed_args.link
+        if link.schema_version == 1:
+            patchqueues = [arg for arg in argv if arg.endswith("patches.tar")]
+            if patchqueues:
+                parsed_args.patchqueue = patchqueues
+        else:
+            parsed_args.patches = []
+            for patch in link.patch_sources:
+                target = [arg for arg in argv if arg.endswith('%s.tar' % (patch))]
+                if target:
+                    parsed_args.patches.append(target[0])
+
+            parsed_args.patchqueues = []
+            for patchqueue in link.patchqueue_sources:
+                target = [arg for arg in argv if arg.endswith('%s.tar' % (patchqueue))]
+                if target:
+                    parsed_args.patchqueues.append(target[0])
 
     return parsed_args
 
@@ -150,35 +164,30 @@ def populate_working_directory(tmpdir, spec, link, sources, patchqueue):
     spec = Spec(tmp_specfile, check_package_name=False)
 
     # Expand patchqueue to working area, rewriting spec as needed
-    print('link => %s, pq => %s' % (link, patchqueue))
-    if link and patchqueue:
-        branch_name = link.patchqueue
-        for idx in range(0, len(patchqueue)):
+    if link:
+        if link.schema_version == 1 and patchqueue:
             # Extract patches
             if link.patchqueue is not None:
-                with Patchqueue(patchqueue[idx],
-                                branch_name) as patches:
-                    try:
-                        patches.extract_all(tmpdir)
-                        patches.add_to_spec(spec, tmp_specfile)
-                    except KeyError:
-                        # No series file so not a patchqueue
-                        pass
+                with Patchqueue(patchqueue,
+                                branch=link.patchqueue) as patches:
+                    patches.extract_all(tmpdir)
+                    patches.add_to_spec(spec, tmp_specfile)
 
-            try:
-                # Extract non-patchqueue sources
-                with Tarball(patchqueue[idx]) as tarball:
-                    if link.sources is not None:
-                        for source in spec.local_sources():
-                            path = os.path.join(link.sources, source)
-                            tarball.extract(path, tmpdir)
-                    if link.patches is not None:
-                        for patch in spec.local_patches():
-                            path = os.path.join(link.patches, patch)
-                            tarball.extract(path, tmpdir)
-            except KeyError:
-                # TODO: make this nicer. Doesn't contain the file.
-                pass
+            # Extract non-patchqueue sources
+            with Tarball(patchqueue) as tarball:
+                if link.sources is not None:
+                    for source in spec.local_sources():
+                        path = os.path.join(link.sources, source)
+                        tarball.extract(path, tmpdir)
+                if link.patches is not None:
+                    for patch in spec.local_patches():
+                        path = os.path.join(link.patches, patch)
+                        tarball.extract(path, tmpdir)
+        elif link.schema_version >= 2:
+            # Do v2 magic
+            patch_sources = link.patch_sources
+            for patch in patch_sources:
+                print('Patch %s => %s' % (patch, patch_sources.get(patch)))
 
     return tmp_specfile
 
